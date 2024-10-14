@@ -1,168 +1,257 @@
-# ----------------------------------------------
-# 🌟 K-CHOPORE 🌟
-# A hearty and satisfying tool for Nanopore sequencing data analysis!
-# This Dockerfile builds K-CHOPORE, a powerful pipeline for Nanopore data processing
-# using ELIGOS2, Bonito, and other essential tools for bioinformatics analysis.
-#
-# Base image: Ubuntu 22.04
-# Maintained by: pelayovic
-# ----------------------------------------------
+# ---------------------------------------------------------
+# Pipeline K-CHOPORE en Snakemake
+# ---------------------------------------------------------
+# Este pipeline de Snakemake automatiza el análisis de datos de secuenciación Nanopore,
+# incluyendo basecalling, alineamiento, detección de modificaciones epitranscriptómicas,
+# y análisis multivariable.
+# Creado por Pelayo González de Lena Rodríguez, MSc
+# FPI Severo Ochoa Fellow
+# Laboratorio de Epigenética del Cáncer y Nanomedicina | FINBA
+# Laboratorio de Biología de Sistemas | Universidad de Oviedo
+# https://www.linkedin.com/in/biopelayo/
+# https://gitlab.com/bio.pelayo/
+# +34 660 74 11 39
+# ---------------------------------------------------------
 
-FROM ubuntu:22.04
+import os
 
-# Evitar interacción durante las instalaciones
-ENV DEBIAN_FRONTEND=noninteractive
+# Cargar el archivo de configuración
+configfile: "config/config.yml"
 
-# ----------------------------------------------
-# Información del mantenedor
-# ----------------------------------------------
-LABEL maintainer="pelayovic"
+# Definir variables desde el archivo de configuración
+out = config["output"]["path"]
 
-# ----------------------------------------------
-# Instalación de herramientas esenciales
-# ----------------------------------------------
-# - yq, curl, jq
-# ----------------------------------------------
-RUN echo "🔄 Installing essential tools: curl, jq, yq..." && \
-    apt-get update && apt-get install -y curl jq && \
-    curl -L https://github.com/mikefarah/yq/releases/download/v4.9.8/yq_linux_amd64 -o /usr/bin/yq && \
-    chmod +x /usr/bin/yq && \
-    echo "✅ Essential tools installed successfully!"
+# Archivos FASTQ y resúmenes de secuenciación
+FASTQ_FILES = config["input_files"]["fastq_files"]
+SUMMARY_FILES = config["input_files"]["sequencing_summaries"]
 
-# ----------------------------------------------
-# Instalar Java (default-jdk) y Picard
-# ----------------------------------------------
-RUN echo "🔄 Installing Java and Picard..." && \
-    apt-get update && apt-get install -y default-jdk wget && \
-    wget https://github.com/broadinstitute/picard/releases/download/2.25.7/picard.jar -P /usr/local/bin/ && \
-    echo "✅ Java and Picard installed successfully!"
+# Directorios y archivos de referencia
+FAST5_DIR = config["input_files"]["fast5_dir"]
+reference_genome = config["input_files"]["reference_genome"]
+reference_index = config["input_files"]["reference_genome_mmi"]
+flair_output_dir = config["input_files"]["flair_output_dir"]
+gtf_file = config["input_files"]["gtf_file"]
+bed_file = config["input_files"]["bed_file"]
+counts_matrix = config["input_files"]["counts_matrix"]
 
-# ----------------------------------------------
-# Instalar Python 3, pip y crear entornos virtuales
-# ----------------------------------------------
-RUN echo "🔄 Installing Python 3, pip, and setting up virtual environments..." && \
-    apt-get update && apt-get install -y python3 python3-pip python3-venv && \
-    rm -rf /var/lib/apt/lists/* && \
-    echo "✅ Python 3, pip, and virtual environments installed!"
+# Parámetros del pipeline
+threads = config["params"]["threads"]
 
-# ----------------------------------------------
-# Instalación de Snakemake y Pulp
-# ----------------------------------------------
-RUN echo "🔄 Installing Snakemake and Pulp..." && \
-    pip install --upgrade pip && \
-    pip install pulp==2.7.0 && \
-    pip install --upgrade snakemake && \
-    sed -i 's/list_solvers/listSolvers/' /usr/local/lib/python3.10/dist-packages/snakemake/__init__.py && \
-    echo "✅ Snakemake and Pulp installed!"
+# Imprimir configuración para depuración
+print(f"[INFO] Genoma de referencia: {reference_genome}")
+print(f"[INFO] Archivos FASTQ: {FASTQ_FILES}")
+print(f"[INFO] Resúmenes de secuenciación: {SUMMARY_FILES}")
+print(f"[INFO] Directorio de salida: {out}")
+print(f"[INFO] Directorio FAST5: {FAST5_DIR}")
+print(f"[INFO] Índice del genoma de referencia: {reference_index}")
+print(f"[INFO] Hilos: {threads}")
 
-# ----------------------------------------------
-# Instalación de Bonito para basecalling
-# ----------------------------------------------
-RUN echo "🔄 Installing Bonito for basecalling..." && \
-    pip install ont-bonito && \
-    echo "✅ Bonito installed!"
+# ---------------------------------------------------------
+# Reglas del Pipeline
+# ---------------------------------------------------------
 
-# ----------------------------------------------
-# Instalación de herramientas de desarrollo y compilación
-# ----------------------------------------------
-RUN echo "🔄 Installing development tools and libraries..." && \
-    apt-get update && apt-get install -y \
-    build-essential \
-    libbz2-dev \
-    zlib1g-dev \
-    libncurses5-dev \
-    libncursesw5-dev \
-    liblzma-dev \
-    libssl-dev \
-    libffi-dev \
-    bedtools \
-    git \
-    r-base \
-    default-jre && \
-    rm -rf /var/lib/apt/lists/* && \
-    echo "✅ Development tools and libraries installed!"
+# Regla para configurar la estructura completa del proyecto
+rule setup_complete_structure:
+    output:
+        "complete_structure_created.txt"
+    run:
+        # Directorios específicos del proyecto general
+        base_dirs = [
+            "config",
+            "data",
+            "docs",
+            "envs",
+            "logs",
+            "notebooks",
+            "publication",
+            "results",
+            "reviews",
+            "scripts"
+        ]
 
-# ----------------------------------------------
-# Instalar minimap2
-# ----------------------------------------------
-RUN echo "🔄 Installing Minimap2..." && \
-    apt-get update && apt-get install -y minimap2 && \
-    echo "✅ Minimap2 installed!"
+        # Directorios adicionales para procesamiento de datos dentro de "results"
+        processing_dirs = [
+            os.path.join("results", "basecalls"),
+            os.path.join("results", "summaries"),
+            os.path.join("results", "mapped"),
+            os.path.join("results", "sorted_bam"),
+            os.path.join("results", "quality_analysis"),
+            os.path.join("results", "flair"),
+            os.path.join("results", "eligos"),
+            os.path.join("results", "multiqc")
+        ]
 
-# ----------------------------------------------
-# Instalar Dorado para basecalling
-# ----------------------------------------------
-RUN echo "🔄 Installing Dorado for basecalling..." && \
-    wget https://cdn.oxfordnanoportal.com/software/analysis/dorado-0.8.0-linux-x64.tar.gz -P /opt/ \
-    && tar -xzvf /opt/dorado-0.8.0-linux-x64.tar.gz -C /opt/ \
-    && rm /opt/dorado-0.8.0-linux-x64.tar.gz \
-    && ln -s /opt/dorado-0.8.0-linux-x64/bin/dorado /usr/local/bin/dorado && \
-    echo "✅ Dorado installed!"
+        # Unir todos los directorios en una lista
+        dirs = base_dirs + processing_dirs
 
-# ----------------------------------------------
-# Instalar dependencias de R
-# ----------------------------------------------
-RUN echo "🔄 Installing R dependencies..." && \
-    Rscript -e 'install.packages("samplesizeCMH", repos="https://cloud.r-project.org")' && \
-    echo "✅ R dependencies installed!"
+        # Crear los directorios si no existen
+        for d in dirs:
+            if not os.path.exists(d):
+                os.makedirs(d)
+                print(f"[INFO] Directorio creado: {d}")
+            else:
+                print(f"[INFO] El directorio ya existe: {d}")
 
-# ----------------------------------------------
-# Descargar modelos de Bonito
-# ----------------------------------------------
-RUN echo "🔄 Downloading Bonito models..." && \
-    bonito download --models && \
-    echo "✅ Bonito models downloaded!"
+        # Marcar la creación de la estructura completa
+        with open(output[0], 'w') as f:
+            f.write("Estructura completa del proyecto creada.")
+        print("[INFO] Estructura completa del proyecto creada exitosamente.")
 
-# ----------------------------------------------
-# Copiar archivo de requisitos de Python y instalar dependencias
-# ----------------------------------------------
-RUN pip install tabulate==0.9.0
-# ----------------------------------------------
-# Instalación de Guppy (versión CPU)
-# ----------------------------------------------
-RUN echo "🔄 Installing Guppy (CPU version)..." && \
-    wget https://mirror.oxfordnanoportal.com/software/analysis/ont-guppy-cpu_6.1.5_linux64.tar.gz -O /opt/ont-guppy-cpu.tar.gz && \
-    tar -xvzf /opt/ont-guppy-cpu.tar.gz -C /opt/ && \
-    echo 'PATH=/opt/ont-guppy-cpu/bin:$PATH' >> ~/.bashrc && \
-    rm /opt/ont-guppy-cpu.tar.gz && \
-    echo "✅ Guppy (CPU version) installed!"
 
-# ----------------------------------------------
-# Instalar flair-brookslab
-# ----------------------------------------------
-RUN echo "🔄 Installing FLAIR for isoform analysis..." && \
-    pip install flair-brookslab && \
-    echo "✅ FLAIR installed!"
 
-# ----------------------------------------------
-# Instalar rpy2 para la integración de R con Python
-# ----------------------------------------------
-RUN echo "🔄 Installing rpy2 for R and Python integration..." && \
-    pip install rpy2 && \
-    echo "✅ rpy2 installed!"
-# Las dependencias de Python necesarias para K-CHOPORE se especifican en este archivo,
-# que será copiado al contenedor y las dependencias serán instaladas usando `pip`.
 
-COPY requirements.txt /home/eligos2/
-RUN pip3 install --no-cache-dir -r /home/eligos2/requirements.txt
-RUN pip install numpy==1.23.5
 
-# ----------------------------------------------
-# Configuración del entorno de trabajo
-# ----------------------------------------------
-WORKDIR /workspace
 
-# ----------------------------------------------
-# Añadir directorios al PATH del sistema
-# ----------------------------------------------
-ENV PATH="/home/eligos2:/home/eligos2/Scripts:/opt/ont-guppy-cpu/bin:$PATH"
+# Regla para indexar el genoma de referencia usando Minimap2
+rule index_genome:
+    input:
+        reference_genome = reference_genome
+    output:
+        reference_index = reference_index
+    shell:
+        """
+        echo "[INFO] Indexando el genoma de referencia usando Minimap2..."
+        minimap2 -d {output.reference_index} {input.reference_genome}
+        echo "[INFO] Indexación del genoma completada."
+        """
 
-# ----------------------------------------------
-# Mensaje de confirmación al terminar la instalación
-# ----------------------------------------------
-RUN echo "🌟 K-CHOPORE Docker image built successfully! Dive into Nanopore sequencing data analysis! 🌟"
 
-# ----------------------------------------------
-# (Opcional) Comando por defecto al iniciar el contenedor
-# ----------------------------------------------
-# ENTRYPOINT ["python3", "/home/eligos2/k_chopo.py"]
+#Regla para indexar el genoma de referencia usando Minimap2
+#rule basecalling:
+#    input:
+#        fast5_dir = FAST5_DIR
+#    output:
+#        fastq_dir = os.path.join(out, "basecalls")
+#    params:
+#        threads = threads,
+#        basecaller = config["tools"]["basecaller"],
+#        guppy_config = config["tools"]["guppy_config_file"],
+#        bonito_model = config["tools"]["bonito_model"]
+#    shell:
+#        """
+#        if [[ "{params.basecaller}" == "guppy" ]]; then
+#            echo "[INFO] Ejecutando basecaller Guppy..."
+#            guppy_basecaller --input_path {input.fast5_dir} --save_path {output.fastq_dir} \
+#                             --config {params.guppy_config} --num_callers {params.threads}
+#        elif [[ "{params.basecaller}" == "bonito" ]]; then
+#            echo "[INFO] Ejecutando basecaller Bonito..."
+#            bonito basecaller {params.bonito_model} {input.fast5_dir} > {output.fastq_dir}/bonito_output.fastq
+#        fi
+#        echo "[INFO] Basecalling completado."
+#        """
+
+# Regla para mapear lecturas FASTQ usando Minimap2
+
+
+# Regla para mapear lecturas FASTQ usando Minimap2
+rule map_with_minimap2:
+    input:
+        fastq_files=expand("data/raw/fastq/{sample}.fastq", sample=["WT_C_R1", "WT_C_R2"]),
+        reference_index=reference_index
+    output:
+        sam_files=expand("results/mapped/{sample}.sam", sample=["WT_C_R1", "WT_C_R2"])
+    params:
+        threads=threads
+    shell:
+        """
+        echo "[INFO] Mapeando archivos FASTQ con Minimap2..."
+        for i in {input.fastq_files}; do
+            sample=$(basename $i .fastq)
+            minimap2 -ax map-ont {input.reference_index} $i -t {params.threads} > results/mapped/${{sample}}.sam
+            echo "[INFO] Mapeo completado para la muestra $sample."
+        done
+        """
+
+# Regla para ordenar e indexar archivos BAM
+rule sort_and_index_bam:
+    input:
+        sam_files = expand(os.path.join(out, "mapped", "{sample}.sam"), sample=["WT_C_R1", "WT_C_R2"])
+    output:
+        bam_files = expand(os.path.join(out, "sorted_bam", "{sample}_sorted.bam"), sample=["WT_C_R1", "WT_C_R2"])
+    shell:
+        """
+        echo "[INFO] Ordenando e indexando archivos BAM..."
+        export PYTHONPATH=/usr/local/lib/python3.10/dist-packages/
+        python3 /workspace/scripts/pipelines/sort_and_index_bam.py {input.sam_files} {output.bam_files}
+        echo "[INFO] Ordenamiento e indexación completados."
+        """
+
+# Regla para análisis de calidad con pycoQC
+rule quality_analysis_with_pycoQC:
+    input:
+        summaries = SUMMARY_FILES,
+        bam_files = expand(os.path.join(out, "sorted_bam", "{sample}_sorted.bam"), sample=["WT_C_R1", "WT_C_R2"])
+    output:
+        htmls = expand(os.path.join(out, "quality_analysis", "pycoQC_output_{sample}.html"), sample=["WT_C_R1", "WT_C_R2"])
+    shell:
+        """
+        echo "[INFO] Ejecutando pycoQC para análisis de calidad..."
+        for sample in WT_C_R1 WT_C_R2; do
+            pycoQC -f {input.summaries} -b {input.bam_files} -o {output.htmls}
+            echo "[INFO] Análisis de calidad completado para la muestra {sample}."
+        done
+        """
+
+# Regla para ejecutar FLAIR para análisis de isoformas
+rule run_flair:
+    input:
+        fastq_files = FASTQ_FILES,
+        reference_genome = reference_genome,
+        gtf_file = gtf_file
+    output:
+        transcriptome_gtf = os.path.join(out, "flair", "flair.collapse.isoforms.gtf"),
+        transcriptome_bed = os.path.join(out, "flair", "flair.collapse.isoforms.bed")
+    shell:
+        """
+        echo "[INFO] Ejecutando FLAIR para análisis de isoformas..."
+        flair align -g {input.reference_genome} -r {input.fastq_files} -o {output.transcriptome_gtf}
+        flair collapse -g {input.reference_genome} -r {input.fastq_files} -f {input.gtf_file} -o {output.transcriptome_gtf}
+        gtfToGenePred {output.transcriptome_gtf} stdout | genePredToBed stdin {output.transcriptome_bed}
+        echo "[INFO] Análisis de isoformas con FLAIR completado."
+        """
+
+# Regla para ejecutar ELIGOS2 para análisis epitranscriptómico
+rule run_eligos2:
+    input:
+        bam_files = expand(os.path.join(out, "sorted_bam", "{sample}_sorted.bam"), sample=["WT_C_R1", "WT_C_R2"]),
+        reference_genome = reference_genome,
+        bed_file = bed_file
+    output:
+        eligos_output = expand(os.path.join(out, "eligos", "{sample}_eligos_output.txt"), sample=["WT_C_R1", "WT_C_R2"])
+    shell:
+        """
+        echo "[INFO] Ejecutando ELIGOS2 para análisis epitranscriptómico..."
+        for sample in WT_C_R1 WT_C_R2; do
+            eligos2 rna_mod -i {input.bam_files} -reg {input.bed_file} -ref {input.reference_genome} \
+            -o {output.eligos_output}
+            echo "[INFO] Análisis con ELIGOS2 completado para la muestra {sample}."
+        done
+        """
+
+# Regla para generar el informe de MultiQC
+#rule run_multiqc:
+#    input:
+#        directories = [
+#            os.path.join(out, dir) for dir in ["basecalls", "mapped", "sorted_bam", "quality_analysis", "flair", "eligos"]
+#        ]
+#    output:
+#        multiqc_report = os.path.join(out, "multiqc", "multiqc_report.html")
+#    shell:
+#        """
+#        echo "[INFO] Generando informe MultiQC..."
+#        multiqc {input.directories} -o {output.multiqc_report}
+#        echo "[INFO] Informe MultiQC generado en {output.multiqc_report}."
+#        """
+
+# Regla "all" para ejecutar todo el pipeline
+rule all:
+    input:
+        "complete_structure_created.txt",
+        expand(os.path.join(out, "mapped", "{sample}.sam"), sample=["WT_C_R1", "WT_C_R2"]),
+        expand(os.path.join(out, "sorted_bam", "{sample}_sorted.bam"), sample=["WT_C_R1", "WT_C_R2"]),
+        expand(os.path.join(out, "quality_analysis", "pycoQC_output_{sample}.html"), sample=["WT_C_R1", "WT_C_R2"]),
+        os.path.join(out, "flair", "flair.collapse.isoforms.gtf"),
+        os.path.join(out, "flair", "flair.collapse.isoforms.bed"),
+        expand(os.path.join(out, "eligos", "{sample}_eligos_output.txt"), sample=["WT_C_R1", "WT_C_R2"]),
+        #os.path.join(out, "multiqc", "multiqc_report.html")
+

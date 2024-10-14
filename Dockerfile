@@ -149,8 +149,8 @@ RUN bonito download --models --show
 # Las dependencias de Python necesarias para K-CHOPORE se especifican en este archivo,
 # que será copiado al contenedor y las dependencias serán instaladas usando `pip`.
 
-COPY requirements.txt /home/eligos2/
-RUN pip3 install --no-cache-dir -r /home/eligos2/requirements.txt
+# COPY requirements.txt /home/eligos2/
+#RUN pip3 install --no-cache-dir -r /home/eligos2/requirements.txt
 RUN pip install numpy==1.23.5
 
 # ----------------------------------------------
@@ -195,6 +195,19 @@ ENV PATH="/opt/ont-guppy-cpu/bin:$PATH"
 RUN pip install flair-brookslab
 # Instalar rpy2 para la integración de R con Python
 RUN pip install rpy2
+# Copiar el requirements.txt al contenedor
+COPY requirements.txt .
+
+# Instalar las dependencias
+
+RUN pip install --no-cache-dir -r requirements.txt
+# Copiar la carpeta scripts al contenedor
+COPY scripts /workspace/scripts
+COPY data /workspace/data
+COPY config /workspace/config
+COPY requirements.txt /workspace/requirements.txt
+ENV PYTHONPATH="/usr/local/lib/python3.10/dist-packages"
+
 
 RUN echo "🌟 K-CHOPORE Docker image built successfully! Dive into Nanopore sequencing data analysis! 🍴"
 
