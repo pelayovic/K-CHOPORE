@@ -165,31 +165,30 @@ rule map_with_minimap2:
 # Regla para ordenar e indexar archivos BAM
 rule sort_and_index_bam:
     input:
-        sam_files = expand(os.path.join(out, "mapped", "{sample}.sam"), sample=["WT_C_R1", "WT_C_R2"])
+        sam_files="results/mapped/{sample}.sam"
     output:
-        bam_files = expand(os.path.join(out, "sorted_bam", "{sample}_sorted.bam"), sample=["WT_C_R1", "WT_C_R2"])
+        bam_file="results/sorted_bam/{sample}_sorted.bam"
     shell:
         """
         echo "[INFO] Ordenando e indexando archivos BAM..."
+        rm -f {output.bam_file}.tmp.*
         export PYTHONPATH=/usr/local/lib/python3.10/dist-packages/
-        python3 /workspace/scripts/pipelines/sort_and_index_bam.py {input.sam_files} {output.bam_files}
+        python3 /workspace/scripts/pipelines/sort_and_index_bam.py {input.sam_files} {output.bam_file}
         echo "[INFO] Ordenamiento e indexación completados."
         """
 
 # Regla para análisis de calidad con pycoQC
 rule quality_analysis_with_pycoQC:
     input:
-        summaries = SUMMARY_FILES,
-        bam_files = expand(os.path.join(out, "sorted_bam", "{sample}_sorted.bam"), sample=["WT_C_R1", "WT_C_R2"])
+        summary="data/raw/summaries/{sample}_sequencing_summary.txt",
+        bam="results/sorted_bam/{sample}_sorted.bam"
     output:
-        htmls = expand(os.path.join(out, "quality_analysis", "pycoQC_output_{sample}.html"), sample=["WT_C_R1", "WT_C_R2"])
+        html="results/quality_analysis/pycoQC_output_{sample}.html"
     shell:
         """
         echo "[INFO] Ejecutando pycoQC para análisis de calidad..."
-        for sample in WT_C_R1 WT_C_R2; do
-            pycoQC -f {input.summaries} -b {input.bam_files} -o {output.htmls}
-            echo "[INFO] Análisis de calidad completado para la muestra {sample}."
-        done
+        pycoQC -f {input.summary} -b {input.bam} -o {output.html}
+        echo "[INFO] Análisis de calidad completado para la muestra {wildcards.sample}."
         """
 
 # Regla para ejecutar FLAIR para análisis de isoformas
