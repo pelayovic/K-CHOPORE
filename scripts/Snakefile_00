@@ -1,0 +1,288 @@
+# ---------------------------------------------------------
+# K-CHOPORE Pipeline en Snakemake
+# ---------------------------------------------------------
+
+# Cargar el archivo de configuración desde config.yml
+configfile: "/workspace/config/config.yml"
+
+# Definir el directorio de salida desde el archivo de configuración
+out = config["output"]["path"]
+
+# Definir el directorio donde están los archivos FAST5
+FAST5_DIR = config["input_files"]["fast5_dir"]
+
+# Definir el modelo de Bonito a usar (si no está definido en el config, se usa un valor predeterminado)
+BONITO_MODEL = config.get("bonito", {}).get("model", "dna_r10.4.1_e8.2_400bps_hac@v5.0.0")
+BONITO_REFERENCE = config.get("bonito", {}).get("reference_genome_mmi", None)
+
+import os
+
+# Comprobar si estamos en entorno Docker o local
+local_base = "/home/pelamovic/K-CHOPORE"
+docker_base = "/workspace"
+
+# Si estamos ejecutando localmente, usar los directorios locales, si no, usar los de Docker
+if os.path.exists(local_base):
+    base_dir = local_base
+else:
+    base_dir = docker_base
+
+# Asegurarse de que el directorio de salida existe
+if not os.path.exists(out):
+    os.makedirs(out)
+
+
+
+rule index_genome:
+    """
+    Esta regla indexa el genoma de referencia utilizando minimap2.
+    """
+    input:
+        reference_genome = config["input_files"]["reference_genome"]  # Archivo de referencia .fasta
+    output:
+        reference_index = config["input_files"]["reference_genome"] + ".mmi"  # Archivo de salida indexado .mmi
+    shell:
+        "minimap2 -d {output.reference_index} {input.reference_genome}"
+
+
+# ---------------------------------------------------------
+# 1. Regla para crear samples_list.txt si no existe
+# ---------------------------------------------------------
+rule list_fast5_files:
+    """
+    Esta regla genera un archivo `samples_list.txt` que contiene una lista
+    de todas las muestras basadas en los archivos FAST5 presentes en el directorio.
+    """
+    output:
+        "samples_list.txt"  # Archivo donde se guardará la lista de muestras
+    run:
+        # Listar todos los archivos FAST5 en el directorio
+        fast5_files = [f for f in os.listdir(FAST5_DIR) if f.endswith(".fast5")]
+        # Generar una lista de nombres de muestras (sin la extensión .fast5)
+        samples = [os.path.splitext(f)[0] for f in fast5_files]
+        # Si no se encuentran archivos FAST5, lanzar un error
+        if len(samples) == 0:
+            raise ValueError(f"No se encontraron archivos FAST5 en el directorio {FAST5_DIR}.")
+        # Escribir las muestras en el archivo de salida
+        with open(output[0], 'w') as f:
+            for sample in samples:
+                f.write(f"{sample}\n")
+        # Imprimir las muestras detectadas para referencia
+        print(f"Detected FAST5 samples: {samples}")
+
+# Leer el archivo generado con las muestras, si el archivo existe
+if os.path.exists("samples_list.txt"):
+    SAMPLES = [line.strip() for line in open("samples_list.txt") if line.strip()]
+else:
+    raise FileNotFoundError("El archivo samples_list.txt no se ha generado correctamente.")
+
+# ---------------------------------------------------------
+# 2. Convertir FAST5 a FASTQ usando el basecaller seleccionado
+# ---------------------------------------------------------
+#rule basecalling:
+ #   """
+  #  Esta regla convierte archivos FAST5 a FASTQ utilizando el basecaller seleccionado.
+   # El basecaller puede ser uno de: guppy, albacore, dorado, bonito.
+    #"""
+ #   input:
+ #       fast5_dir = FAST5_DIR,  # Directorio de archivos FAST5
+ #       samples_list = "samples_list.txt"  # La lista de muestras generada
+ #   output:
+ #       fastq_file = expand(out + "/basecalls/{sample}.fastq", sample=SAMPLES),
+ #       sequencing_summary = expand(out + "/summaries/{sample}_sequencing_summary.txt", sample=SAMPLES)
+ #   params:
+ #       basecaller = lambda wildcards: config["options"]["basecaller"]  # Basecaller a usar, desde config
+ #   shell:
+ #       """
+ #       if [[ "{params.basecaller}" == "guppy" ]]; then
+ #           guppy_basecaller -i {input.fast5_dir} -s {output.fastq_file} --compress_fastq --flowcell FLO-MIN106 --kit SQK-LSK109
+ #       elif [[ "{params.basecaller}" == "albacore" ]]; then
+ #           read_fast5_basecaller.py --input {input.fast5_dir} --save_path {output.fastq_file} --recursive --output_format fastq
+ #       elif [[ "{params.basecaller}" == "dorado" ]]; then
+ #           dorado_basecaller {input.fast5_dir} {config["input_files"]["reference_genome"]} -o {output.fastq_file}
+ #       elif [[ "{params.basecaller}" == "bonito" ]]; then
+ #           bonito basecaller {BONITO_MODEL} {input.fast5_dir} --reference {BONITO_REFERENCE} > {output.fastq_file}
+ #       fi
+
+
+
+
+ #       """
+rule basecalling:
+    """
+    Esta regla convierte archivos FAST5 a FASTQ utilizando Bonito.
+    """
+    input:
+        fast5_file = lambda wildcards: f"{FAST5_DIR}/{wildcards.sample}.fast5",  # Archivo FAST5 correspondiente a cada muestra
+        reference_index = rules.index_genome.output.reference_index  # Archivo de referencia indexado
+    output:
+        fastq_file = f"{out}/basecalls/{{sample}}.fastq",
+        sequencing_summary = f"{out}/summaries/{{sample}}_sequencing_summary.txt"
+    params:
+        basecaller_model = BONITO_MODEL  # Modelo de Bonito a usar
+    shell:
+        """
+        # Procesar el archivo FAST5 y generar su correspondiente archivo FASTQ y archivo de resumen
+        bonito basecaller {params.basecaller_model} --reference {input.reference_index} {input.fast5_file} --device cpu > {output.fastq_file} 
+        """
+
+# ---------------------------------------------------------
+
+#rule dorado_basecalling:
+ #   input:
+ #       pod5_files = "/path/to/pod5s/*"  # Adjust this path based on your input data
+ #   output:
+ #       bam = "results/calls.bam"
+ #   params:
+ #       basecaller = "hac"  # You can customize this parameter as needed
+ #   shell:
+  #      """
+  #      dorado basecaller {params.basecaller} {input.pod5_files} > {output.bam}
+  #      """
+
+
+# ---------------------------------------------------------
+# 3. Mapeo con Minimap2
+# ---------------------------------------------------------
+rule map_with_minimap2:
+    """
+    Esta regla realiza el mapeo de los archivos FASTQ generados contra el genoma de referencia utilizando Minimap2.
+    """
+    input:
+        fastq_files = expand(out + "/basecalls/{sample}.fastq", sample=SAMPLES),  # Archivos FASTQ generados
+        reference_genome = config["input_files"]["reference_genome"]  # Genoma de referencia
+    output:
+        sam_files = expand(out + "/mapped/{sample}.sam", sample=SAMPLES)  # Archivos SAM de salida
+    shell:
+        """
+        for i in $(seq 0 $((${#input.fastq_files[@]}-1))); do
+            fastq_file=${input.fastq_files[$i]}
+            sample=$(basename $fastq_file .fastq)
+            minimap2 -ax map-ont {input.reference_genome} $fastq_file > {output.sam_files[$i]}
+        done
+        """
+
+# ---------------------------------------------------------
+# 4. Ordenar e indexar el BAM
+# ---------------------------------------------------------
+rule sort_and_index_bam:
+    """
+    Esta regla ordena e indexa los archivos BAM resultantes del mapeo.
+    """
+    input:
+        sam_file = rules.sam_with_minimap2.output.sam_file  # Archivo SAM generado por Minimap2
+    output:
+        bam_file = expand(out + "/sorted_bam/{sample}.bam", sample=SAMPLES)  # Archivo BAM de salida
+    script:
+        "/workspace/scripts/pipelines/sort_and_index_bam.py"  # Script Python para ordenar e indexar
+
+# ---------------------------------------------------------
+# 5. Análisis de calidad con PycoQC
+# ---------------------------------------------------------
+# Donde se hace referencia a sequencing_summary_R2
+rule quality_analysis_with_pycoQC:
+    """
+    Esta regla ejecuta PycoQC para generar informes de calidad del secuenciamiento utilizando los archivos BAM ordenados.
+    """
+    input:
+        sorted_bam = expand(out + "/sorted_bam/{sample}.bam", sample=SAMPLES)  # Archivos BAM ordenados
+    output:
+        pycoQC_output = expand(out + "/quality_analysis/pycoQC_output_{sample}.html", sample=SAMPLES)  # Archivo HTML de salida
+    shell:
+        """
+        pycoQC -b {input.sorted_bam} -o {output.pycoQC_output}
+        """
+
+# ---------------------------------------------------------
+# 6. Resumen de calidad con MultiQC
+# ---------------------------------------------------------
+rule multiqc:
+    """
+    Esta regla ejecuta MultiQC para generar un resumen de los análisis de calidad.
+    """
+    input:
+        expand(out + "/sorted_bam/{sample}.bam", sample=SAMPLES),  # Archivos BAM generados
+        expand(out + "/quality_analysis/pycoQC_output_{sample}.html", sample=SAMPLES)  # Archivos de análisis de calidad
+    output:
+        multiqc_report = out + "/logs/multiqc_report.html"  # Informe MultiQC
+    shell:
+        """
+        multiqc {input} -o {output.multiqc_report}
+        """
+
+# ---------------------------------------------------------
+# 7. FLAIR para la construcción del transcriptoma
+# ---------------------------------------------------------
+#rule run_flair:
+#    """
+#    Esta regla ejecuta FLAIR para el análisis y cuantificación de isoformas.
+#    """
+#    input:
+#        fastq_file = rules.basecalling.output.bam_file[0],  # Archivo FASTQ generado
+#        reference_genome = config["input_files"]["reference_genome"],  # Genoma de referencia
+#        gtf_file = config["input_files"]["gtf_file"]  # Archivo GTF
+#    output:
+#        transcriptome_file = out + "/flair/transcriptome.gtf"  # Archivo GTF de salida con el transcriptoma
+ #   shell:
+ #       """
+ #       cd {config["input_files"]["flair_repo"]}
+ #       python flair.py align -g {input.reference_genome} -r {input.fastq_file}
+ #       python flair.py collapse -g {input.reference_genome} -r {input.fastq_file} -f {input.gtf_file}
+ #       python flair.py quantify -g {input.reference_genome} -r {input.fastq_file}
+ #       """
+
+# ---------------------------------------------------------
+# 8. Detección de modificaciones epitranscriptómicas con ELIGOS2
+# ---------------------------------------------------------
+rule eligos2:
+    """
+    Esta regla ejecuta ELIGOS2 para detectar modificaciones epitranscriptómicas.
+    """
+    input:
+        bam_file = rules.sort_and_index_bam.output.bam_file[0],  # Archivo BAM generado
+        reference_genome = config["input_files"]["reference_genome"],  # Genoma de referencia
+        bed_file = config["input_files"]["bed_file"]  # Archivo BED con las regiones de interés
+    output:
+        eligos_results = out + "/eligos/eligos_output.txt"  # Resultados de ELIGOS2
+    shell:
+        """
+        eligos2 rna_mod -i {input.bam_file} -reg {input.bed_file} -ref {input.reference_genome} -o results --pval 0.05 --oddR 5 --esb 0.2
+        """
+
+# ---------------------------------------------------------
+# 9. Análisis adicional de isoformas y multivariable
+# ---------------------------------------------------------
+rule additional_isoform_and_multivariable_analysis:
+    """
+    Esta regla ejecuta el análisis de isoformas y análisis multivariable (PCA y SPLS).
+    """
+    input:
+        iso_usage_file = config["input_files"]["iso_usage_file"],  # Archivo de uso de isoformas
+        counts_matrix = config["input_files"]["counts_matrix"]  # Matriz de conteo
+    output:
+        pca_output = config["input_files"]["pca_output"],  # Archivo de salida de PCA
+        spls_output = config["input_files"]["spls_output"],  # Archivo de salida de SPLS
+        isoformswitch_output = config["input_files"]["isoformswitch_analyzer_output"]  # Archivo de salida del analizador de isoformas
+    shell:
+        """
+        python /path/to/isoformswitch_analyzer/isoformswitch_analyzer.py -i {input.iso_usage_file} -o {output.isoformswitch_output}
+        python /path/to/pca_analysis.py -i {input.counts_matrix} -o {output.pca_output}
+        python /path/to/spls_analysis.py -i {input.counts_matrix} -o {output.spls_output}
+        """
+
+# ---------------------------------------------------------
+# Regla final que asegura que la lista de muestras se genere primero
+# ---------------------------------------------------------
+
+# ---------------------------------------------------------
+# Regla final: asegura que todos los pasos se ejecuten
+# ---------------------------------------------------------
+rule all:
+    """
+    Esta es la regla final que asegura que todos los pasos del pipeline se ejecuten correctamente para todas las muestras.
+    """
+    input:
+        expand(out + "/basecalls/{sample}.fastq", sample=SAMPLES),  # Archivos FASTQ
+        expand(out + "/sorted_bam/{sample}.bam", sample=SAMPLES),  # Archivos BAM
+        expand(out + "/quality_analysis/pycoQC_output_{sample}.html", sample=SAMPLES),  # Salida de PycoQC
+        out + "/logs/multiqc_report.html"  # Reporte MultiQC

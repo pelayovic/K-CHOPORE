@@ -1,0 +1,24 @@
+# INPUT FILES AND DIRECTORIES
+input_files:
+  fastq_files:
+    - "/home/pelamovic/K-CHOPORE/data/raw/fastq/WT_C_R1.fastq"
+    - "/home/pelamovic/K-CHOPORE/data/raw/fastq/WT_C_R2.fastq"
+  sequencing_summaries:
+    - "/home/pelamovic/K-CHOPORE/data/raw/summaries/WT_C_R1_sequencing_summary_FAR90122_d34138fc.txt"
+    - "/home/pelamovic/K-CHOPORE/data/raw/summaries/WT_C_R2_sequencing_summary_FAR91957_a56dafa5.txt"
+  reference_genome: "/home/pelamovic/K-CHOPORE/data/reference/genome/TAIR10_chr_all.fas.fasta"
+  reference_genome_mmi: "/home/pelamovic/K-CHOPORE/data/reference/genome/TAIR10_chr_all.fas.fasta.mmi"
+  fast5_dir: "/home/pelamovic/K-CHOPORE/data/raw/fast5"
+  flair_output_dir: "/home/pelamovic/K-CHOPORE/results/flair_output"
+  gtf_file: "/home/pelamovic/K-CHOPORE/data/reference/annotations/AtRTDv2_QUASI_19April2016.gtf"
+  bed_file: "/home/pelamovic/K-CHOPORE/results/flair.collapse.isoforms.bed"
+  counts_matrix: "/home/pelamovic/K-CHOPORE/results/counts_matrix.tsv"
+  fastq_dir: "/home/pelamovic/K-CHOPORE/data/raw/fastq"
+  summary_dir: "/home/pelamovic/K-CHOPORE/data/raw/summaries"
+
+
+# OUTPUT SETTINGS
+output:
+  path: "/home/pelamovic/K-CHOPORE/results"
+  logs: "/home/pelamovic/K-CHOPORE/logs"
+

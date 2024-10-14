@@ -1,0 +1,353 @@
+# ---------------------------------------------------------
+# K-CHOPORE Pipeline in Snakemake
+# ---------------------------------------------------------
+# This Snakemake pipeline automates the analysis of Nanopore sequencing data,
+# including basecalling, alignment, epitranscriptomic modification detection,
+# and multivariable analysis. Please ensure the configuration file is accurate.
+# ---------------------------------------------------------
+
+import os
+
+# Load the configuration file
+configfile: "/home/pelamovic/K-CHOPORE/config/config.yml"
+
+# Define the output directory from the configuration file
+out = config["output"]["path"]
+
+# Define the directory where FAST5 files are located
+FAST5_DIR = config["input_files"]["fast5_dir"]
+
+# Check if the basecaller has been specified in the configuration file
+BASECALLER = config["input_files"].get("basecaller")
+
+# If the basecaller is not specified, ask the user to select one
+if not BASECALLER:
+    print("\n[INFO] No basecaller specified in the config file.")
+    BASECALLER = input("Please select the basecaller (bonito, guppy, dorado): ").strip().lower()
+    if BASECALLER not in ["bonito", "guppy", "dorado"]:
+        raise ValueError(f"Invalid basecaller '{BASECALLER}'. Please choose from 'bonito', 'guppy', or 'dorado'.")
+
+# Print the selected basecaller
+print(f"\n[INFO] Basecaller selected: {BASECALLER}")
+
+# Define parameters for each basecaller
+BONITO_MODEL = config.get("bonito", {}).get("model", "dna_r10.4.1_e8.2_400bps_hac@v5.0.0")
+GUPPY_PARAMS = config.get("guppy", {})
+DORADO_PARAMS = config.get("dorado", {})
+
+# Check if we are running in a Docker environment or locally
+local_base = "/home/pelamovic/K-CHOPORE"
+docker_base = "/workspace"
+
+# Use local directories if they exist, otherwise use Docker directories
+base_dir = local_base if os.path.exists(local_base) else docker_base
+
+# Ensure the output directory exists
+os.makedirs(out, exist_ok=True)
+
+# Print the setup confirmation
+print(f"\n[INFO] Output directory: {out}")
+print(f"[INFO] FAST5 directory: {FAST5_DIR}")
+print(f"[INFO] Base directory: {base_dir}")
+
+# ---------------------------------------------------------
+# Pipeline Rules
+# ---------------------------------------------------------
+
+# rule for sample generation
+rule generate_samples:
+    output:
+        "samples_list.txt"
+    shell:
+        """
+        #!/bin/bash
+
+        # Detectar si el script está siendo ejecutado dentro de Docker
+        if grep -q docker /proc/1/cgroup; then
+            FAST5_DIR="/workspace/data/raw/fast5"  # Ruta dentro del contenedor Docker
+        else
+            FAST5_DIR="/home/pelamovic/K-CHOPORE/data/raw/fast5"  # Ruta local fuera de Docker
+        fi
+
+        SAMPLES_FILE="samples_list.txt"
+
+        # Verificar si el directorio de FAST5 existe
+        if [ ! -d "$FAST5_DIR" ]; then
+            echo "Error: El directorio $FAST5_DIR no existe."
+            exit 1
+        fi
+
+        # Listar archivos FAST5 y generar la lista de muestras
+        fast5_files=$(ls "$FAST5_DIR"/*.fast5 2> /dev/null)
+        if [ -z "$fast5_files" ]; then
+            echo "Error: No se encontraron archivos FAST5 en $FAST5_DIR."
+            exit 1
+        fi
+
+        # Crear o limpiar el archivo samples_list.txt
+        > "$SAMPLES_FILE"
+
+        # Extraer los nombres de las muestras y escribirlos en el archivo
+        for file in $fast5_files; do
+            sample_name=$(basename "$file" .fast5)
+            echo "$sample_name" >> "$SAMPLES_FILE"
+        done
+
+        echo "Lista de muestras generada en $SAMPLES_FILE."
+        """
+
+
+# Rule to index the reference genome using Minimap2
+rule index_genome:
+    input:
+        reference_genome = config["input_files"]["reference_genome"]
+    output:
+        reference_index = f"{config['input_files']['reference_genome']}.mmi"
+    shell:
+        """
+        echo "[INFO] Indexing reference genome using Minimap2..."
+        # Debugging: Verify the path of the reference genome file
+        ls -l {input.reference_genome}
+        # Generate the index with Minimap2
+        minimap2 -d {output.reference_index} {input.reference_genome}
+        echo "[INFO] Reference genome indexing completed."
+        """
+
+# Rule to create necessary directories for processing
+rule create_directories:
+    output:
+        "directories_created.txt"
+    run:
+        basecalls_dir = os.path.join(out, "basecalls")
+        summaries_dir = os.path.join(out, "summaries")
+        os.makedirs(basecalls_dir, exist_ok=True)
+        os.makedirs(summaries_dir, exist_ok=True)
+        
+        # Crea un archivo vacío para indicar que las carpetas ya fueron creadas
+        with open(output[0], 'w') as f:
+            f.write("")
+
+        print(f"\n[INFO] Directories created or already exist:")
+        print(f" - Basecalls directory: {basecalls_dir}")
+        print(f" - Summaries directory: {summaries_dir}")
+
+
+
+
+
+# Load samples from the generated file
+if os.path.exists("samples_list.txt"):
+    SAMPLES = [line.strip() for line in open("samples_list.txt") if line.strip()]
+else:
+    raise FileNotFoundError("[ERROR] The samples_list.txt file was not generated correctly.")
+
+# Print the loaded samples
+print(f"\n[INFO] Samples to process: {SAMPLES}")
+
+# Define the basecalling rule based on the selected basecaller
+if BASECALLER == "bonito":
+    rule basecalling_bonito:
+        input:
+            fast5_file = lambda wildcards: f"{FAST5_DIR}/{wildcards.sample}.fast5",
+            reference_index = rules.index_genome.output.reference_index
+        output:
+            fastq_file = f"{out}/basecalls/{{sample}}.fastq",
+            sequencing_summary = f"{out}/summaries/{{sample}}_sequencing_summary.txt"
+        params:
+            basecaller_model = BONITO_MODEL
+        shell:
+            """
+            echo "[INFO] Running Bonito basecaller for sample {wildcards.sample}..."
+            bonito basecaller {params.basecaller_model} --reference {input.reference_index} {input.fast5_file} --device cpu > {output.fastq_file}
+            echo "[INFO] Basecalling completed for sample {wildcards.sample}."
+            """
+
+#elif BASECALLER == "guppy":
+#    rule basecalling_guppy:
+#        input:
+#            fast5_file = lambda wildcards: f"{FAST5_DIR}/{wildcards.sample}.fast5"
+#        output:
+#            fastq_file = os.path.join(out, "basecalls/pass", "{sample}.fastq"),  # Guardar en la carpeta 'pass'
+#            sequencing_summary = os.path.join(out, "basecalls/pass", "{sample}_sequencing_summary.txt")  # Guardar en la misma carpeta
+#        params:
+#            guppy_model = GUPPY_PARAMS.get("model", "dna_r9.4.1_450bps_hac"),
+#            guppy_config = GUPPY_PARAMS.get("config_file", "/opt/ont-guppy-cpu/data/dna_r9.4.1_450bps_hac.cfg"),  
+#            threads = 12  # Ajusta según tus necesidades
+#        shell:
+#            """
+#            echo "[INFO] Running Guppy basecaller for sample {wildcards.sample}..."
+#            guppy_basecaller --input_path {FAST5_DIR} \
+#                             --save_path {out}/basecalls/pass/ \  # Asegúrate de que ambos archivos se guarden aquí
+#                             --config {params.guppy_config} \
+#                             --recursive \
+#                             --num_callers {params.threads}
+#            echo "[INFO] Basecalling completed for sample {wildcards.sample}."
+#            """
+
+
+
+elif BASECALLER == "guppy":
+    rule basecalling_guppy:
+        input:
+            fast5_file = f"{FAST5_DIR}/{{sample}}.fast5"  # Usa {sample} como un wildcard en el input
+        output:
+            fastq_file = os.path.join(out, "basecalls/pass/fail", "fastq_runid_{{sample}}_*.fastq"),  # Usa {sample} en el output
+            sequencing_summary = os.path.join(out, "basecalls/pass", "{{sample}}_sequencing_summary.txt")
+        params:
+            guppy_config = GUPPY_PARAMS.get("config_file", "/opt/ont-guppy-cpu/data/dna_r9.4.1_450bps_hac.cfg"),
+            threads = 12
+        shell:
+            """           
+            echo "[DEBUG] Wildcard sample: {wildcards.sample}"  # Línea de depuración para verificar el valor del wildcard
+            echo "[INFO] Running Guppy basecaller for sample {wildcards.sample}..."
+            guppy_basecaller --input_path {input.fast5_file} \
+                             --save_path {out}/basecalls/pass/ \
+                             --config {params.guppy_config} \
+                             --recursive \
+                             --num_callers {params.threads}
+
+            echo "[INFO] Basecalling completed for sample {wildcards.sample}."
+            """
+
+
+elif BASECALLER == "dorado":
+    rule basecalling_dorado:
+        input:
+            pod5_files = lambda wildcards: expand(f"{FAST5_DIR}/{wildcards.sample}.pod5")
+        output:
+            fastq_file = os.path.join(out, "basecalls", "{sample}.fastq")
+        params:
+            model = DORADO_PARAMS["model"],
+            version = DORADO_PARAMS["version"],
+            threads = 8
+        shell:
+            """
+            echo "[INFO] Running Dorado basecaller for sample {wildcards.sample}..."
+            dorado basecaller --model {params.model} --version {params.version} --threads {params.threads} \
+                              {input.pod5_files} > {output.fastq_file}
+            echo "[INFO] Basecalling completed for sample {wildcards.sample}."
+            """
+
+
+
+
+# Regla para mapear con Minimap2
+rule map_with_minimap2:
+    input:
+        fastq_files = lambda wildcards: glob_wildcards(f"{out}/basecalls/pass/fail/fastq_runid_{wildcards.sample}_*.fastq").path,
+        reference_genome = config["input_files"]["reference_genome"]
+    output:
+        sam_file = f"{out}/mapped/{{wildcards.sample}}.sam"  # Asegúrate de que el nombre del archivo SAM sea correcto
+    shell:
+        export PATH=$PATH:/opt/ont-guppy-cpu/bin
+        echo "[INFO] Mapping reads with Minimap2 for sample {wildcards.sample}..."
+        echo "[DEBUG] Input FASTQ files: {input.fastq_files}"
+        echo "[DEBUG] Reference genome: {input.reference_genome}"
+        minimap2 -ax map-ont {input.reference_genome} {input.fastq_files} - > {output.sam_file}
+        echo "[INFO] Mapping completed for sample {wildcards.sample}."
+        """
+
+
+# Regla para ordenar e indexar BAM
+rule sort_and_index_bam:
+    input:
+        sam_files = expand(f"{out}/mapped/{{sample}}.sam", sample=SAMPLES)  # Asegúrate de que estos archivos existan
+    output:
+        bam_files = expand(f"{out}/sorted_bam/{{sample}}_sorted.bam", sample=SAMPLES)
+    shell:
+        """
+        echo "[INFO] Sorting and indexing BAM files for samples..."
+        python3 /workspace/scripts/pipelines/sort_and_index_bam.py {input.sam_files} {config[input_files][reference_genome]}
+        echo "[INFO] Sorting and indexing completed."
+        """
+
+
+
+
+
+
+# Rule for quality analysis with pycoQC
+rule quality_analysis_with_pycoQC:
+    input:
+        sequencing_summary = expand(os.path.join(out, "basecalls/pass", "sequencing_summary.txt"), sample=SAMPLES),  # Ajusta aquí
+        sorted_bam = expand(os.path.join(out, "sorted_bam", "{sample}_sorted.bam"), sample=SAMPLES)
+    output:
+        pycoQC_output = expand(os.path.join(out, "quality_analysis", "pycoQC_output_{sample}.html"), sample=SAMPLES)
+        shell:
+        """
+        echo "[INFO] Running quality analysis with pycoQC for samples..."
+        pycoQC -f {input.sequencing_summary} -b {input.sorted_bam} -o {output.pycoQC_output}
+        echo "[INFO] Quality analysis completed for samples."
+        """
+
+# Rule to execute FLAIR for isoform analysis
+rule run_flair:
+    """
+    Esta regla ejecuta FLAIR para el análisis y cuantificación de isoformas.
+    """
+    input:
+        fastq_file = expand(out + "/basecalls/pass/fail/{sample}.fastq", sample=SAMPLES),  # Archivos FASTQ generados
+        reference_genome = config["input_files"]["reference_genome"],  # Genoma de referencia
+        gtf_file = config["input_files"]["gtf_file"]  # Archivo GTF
+    output:
+        transcriptome_gtf = out + "/flair/flair.collapse.isoforms.gtf",  # Archivo GTF del transcriptoma
+        transcriptome_bed = out + "/flair/flair.collapse.isoforms.bed"  # Archivo BED del transcriptoma
+    shell:
+        """
+        cd {config["input_files"]["flair_repo"]}
+        python3 flair.py align -g {input.reference_genome} -r {input.fastq_file} -t {threads} -o {output.transcriptome_gtf}
+        python3 flair.py collapse -g {input.reference_genome} -r {input.fastq_file} -f {input.gtf_file} -o {output.transcriptome_gtf}
+        python3 flair.py quantify -g {input.reference_genome} -r {input.fastq_file} -o {output.transcriptome_gtf}
+        # Convert the GTF to BED
+        gtfToGenePred {output.transcriptome_gtf} stdout | genePredToBed stdin {output.transcriptome_bed}
+        """
+
+# Rule to execute the analysis with ELIGOS2
+rule eligos2:
+    input:
+        bam_file = rules.sort_and_index_bam.output.bam_files[0],
+        reference_genome = config["input_files"]["reference_genome"],
+        bed_file = rules.run_flair.output.transcriptome_bed
+    output:
+        eligos_results = os.path.join(out, "eligos", "eligos_output.txt")
+    shell:
+        """
+        echo "[INFO] Running ELIGOS2 for epitranscriptomic modification detection..."
+        eligos2 rna_mod -i {input.bam_file} -reg {input.bed_file} -ref {input.reference_genome} -o {output.eligos_results} --pval 0.05 --nb_workers 4
+        echo "[INFO] ELIGOS2 analysis completed. Results saved to: {output.eligos_results}"
+        """
+
+# Rule for isoform and multivariable analysis
+#rule additional_isoform_and_multivariable_analysis:
+#    input:
+#        iso_usage_file = config["input_files"]["iso_usage_file"],
+#        counts_matrix = config["input_files"]["counts_matrix"]
+#    output:
+#        pca_output = config["input_files"]["pca_output"],
+#        spls_output = config["input_files"]["spls_output"],
+#        isoformswitch_output = config["input_files"]["isoformswitch_analyzer_output"]
+#    shell:
+#        """
+#        echo "[INFO] Running isoform analysis and multivariable analysis..."
+#        python /path/to/isoformswitch_analyzer/isoformswitch_analyzer.py -i {input.iso_usage_file} -o {output.isoformswitch_output}
+#        python /path/to/pca_analysis.py -i {input.counts_matrix} -o {output.pca_output}
+#        python /path/to/spls_analysis.py -i {input.counts_matrix} -o {output.spls_output}
+#        echo "[INFO] Isoform and multivariable analysis completed."
+#        """
+
+# "all" rule to execute the entire pipeline
+# "all" rule to execute the entire pipeline
+rule all:
+    input:
+        "directories_created.txt",  # Asegúrate de que los directorios estén creados
+        "samples_list.txt",
+        expand(out + "/basecalls/pass/fail/fastq_runid_*.fastq"),  # Asegúrate de que todos los archivos FASTQ se incluyan
+        expand(out + "/basecalls/pass/{sample}_sequencing_summary.txt", sample=SAMPLES),  # Archivos de resumen de secuenciación
+        expand(out + "/mapped/{sample}.sam", sample=SAMPLES),  # Archivos SAM generados
+        expand(out + "/sorted_bam/{sample}_sorted.bam", sample=SAMPLES),  # Archivos BAM ordenados        
+        out + "/flair/flair.collapse.isoforms.gtf",
+        out + "/flair/flair.collapse.isoforms.bed",
+        os.path.join(out, "eligos", "eligos_output.txt"),
+        expand(out + "/quality_analysis/pycoQC_output_{sample}.html", sample=SAMPLES),
+        config["input_files"]["reference_genome"] + ".mmi"
+

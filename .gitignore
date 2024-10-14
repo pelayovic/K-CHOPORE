@@ -1,0 +1,23 @@
+# Ignorar la carpeta results
+results/
+
+# Ignorar archivos temporales y carpetas de Snakemake
+.snakemake/
+logs/
+
+# Ignorar la carpeta notebooks
+# notebooks/
+
+# Ignorar archivos de datos crudos
+data/raw/
+data/
+
+# Ignorar todos los archivos grandes como BAM, SAM, FASTQ
+
+*.bam
+*.sam
+*.fastq
+
+# Archivos de sistema y temporales
+.git_corrupt/
+envs/

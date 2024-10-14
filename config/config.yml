@@ -1,0 +1,45 @@
+# INPUT FILES AND DIRECTORIES
+input_files:
+  fastq_files:
+    - "data/raw/fastq/WT_C_R1.fastq"
+    - "data/raw/fastq/WT_C_R2.fastq"
+  sequencing_summaries:
+    - "data/raw/summaries/WT_C_R1_sequencing_summary_FAR90122_d34138fc.txt"
+    - "data/raw/summaries/WT_C_R2_sequencing_summary_FAR91957_a56dafa5.txt"
+  reference_genome: "data/reference/genome/TAIR10_chr_all.fas.fasta"
+  reference_genome_mmi: "data/reference/genome/TAIR10_chr_all.fas.fasta.mmi"
+  fast5_dir: "data/raw/fast5"
+  flair_output_dir: "results/flair_output"
+  gtf_file: "data/reference/annotations/AtRTDv2_QUASI_19April2016.gtf"
+  bed_file: "results/flair/flair.collapse.isoforms.bed"
+  counts_matrix: "results/counts_matrix.tsv"
+  fastq_dir: "data/raw/fastq"
+  summary_dir: "data/raw/summaries"
+
+# OUTPUT SETTINGS
+output:
+  path: "results"                   # Directorio base para todos los resultados
+  logs: "logs"                      # Directorio para archivos de log
+  basecalls_dir: "results/basecalls" # Directorio específico para los archivos de basecalling
+  mapped_dir: "results/mapped"       # Directorio para los archivos SAM/BAM mapeados
+  flair_dir: "results/flair"         # Directorio para los resultados de FLAIR
+  quality_analysis: "results/quality_analysis" # Análisis de calidad (ej. pycoQC)
+  eligos2_dir: "results/eligos"      # Directorio para los resultados de ELIGOS2
+  multiqc: "results/multiqc"         # Directorio para el reporte final de MultiQC
+
+# TOOL CONFIGURATIONS
+tools:
+  basecaller: "guppy"                # Basecaller utilizado (opciones: guppy, bonito, dorado)
+  guppy_config_file: "/opt/ont-guppy-cpu/data/dna_r9.4.1_450bps_hac.cfg" # Configuración para Guppy
+  bonito_model: "dna_r10.4.1_e8.2_400bps_hac@v5.0.0" # Modelo utilizado en Bonito
+  dorado_model: "dna_r10.4.1_e8.2"   # Modelo utilizado en Dorado
+
+# ANALYSIS PARAMETERS
+params:
+  threads: 12                        # Número de hilos a utilizar en todo el pipeline
+  latency_wait: 30                   # Tiempo de espera por latencia para el pipeline
+  pval_threshold: 0.05               # Umbral de p-valor para ELIGOS2
+  oddR_threshold: 5                  # Ratio de odds para ELIGOS2
+  esb_threshold: 0.2                 # Umbral para epitranscriptomic signals en ELIGOS2
+  qc_report_title: "Quality_Report"  # Título del reporte de pycoQC
+

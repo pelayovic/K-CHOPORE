@@ -1,0 +1,215 @@
+# ---------------------------------------------------------
+# K-CHOPORE Pipeline in Snakemake
+# ---------------------------------------------------------
+# This Snakemake pipeline automates the analysis of Nanopore sequencing data,
+# including basecalling, alignment, epitranscriptomic modification detection,
+# and multivariable analysis. Please ensure the configuration file is accurate.
+# ---------------------------------------------------------
+
+import os
+
+# Load the configuration file
+configfile: "/home/pelamovic/K-CHOPORE/config/config.yml"
+
+# Define the output directory from the configuration file
+out = config["output"]["path"]
+
+# Define FASTQ and sequencing summary files from the configuration
+FASTQ_FILES = config["input_files"]["fastq_files"]
+SUMMARY_FILES = config["input_files"]["sequencing_summaries"]
+
+# Define directories for fast5, reference genome, etc.
+FAST5_DIR = config["input_files"]["fast5_dir"]
+reference_genome = config["input_files"]["reference_genome"]
+reference_index = reference_genome + ".mmi"
+flair_output_dir = config["input_files"]["flair_output_dir"]
+gtf_file = config["input_files"]["gtf_file"]
+bed_file = config["input_files"]["bed_file"]
+counts_matrix = config["input_files"]["counts_matrix"]
+
+# Print for debugging
+print(f"[INFO] Reference genome path: {reference_genome}")
+print(f"[INFO] FASTQ files: {FASTQ_FILES}")
+print(f"[INFO] Sequencing summaries: {SUMMARY_FILES}")
+
+# ---------------------------------------------------------
+# Pipeline Rules
+# ---------------------------------------------------------
+
+# Rule to create necessary directories for processing
+rule create_directories:
+    output:
+        "directories_created.txt"
+    run:
+        dirs = [
+            os.path.join(out, "basecalls"),
+            os.path.join(out, "summaries"),
+            os.path.join(out, "mapped"),
+            os.path.join(out, "sorted_bam"),
+            os.path.join(out, "quality_analysis"),
+            os.path.join(out, "flair"),
+            os.path.join(out, "eligos")
+        ]
+        for d in dirs:
+            os.makedirs(d, exist_ok=True)
+
+        # Create a file to indicate that directories have been created
+        with open(output[0], 'w') as f:
+            f.write("Directories created.")
+        print("[INFO] All directories have been created.")
+
+# Rule to index the reference genome using Minimap2
+rule index_genome:
+    input:
+        reference_genome = reference_genome
+    output:
+        reference_index = reference_index
+    shell:
+        """
+        echo "[INFO] Indexing reference genome using Minimap2..."
+        ls -l {input.reference_genome}
+        minimap2 -d {output.reference_index} {input.reference_genome}
+        echo "[INFO] Reference genome indexing completed."
+        """
+
+# Rule for mapping with Minimap2
+rule map_with_minimap2:
+    input:
+        fastq_files = config["input_files"]["fastq_files"],
+        reference_genome = config["input_files"]["reference_genome"]
+    output:
+        sam_files = expand(f"{out}/mapped/{{sample}}.sam", sample=["WT_C_R1", "WT_C_R2"])
+    params:
+        samples = ["WT_C_R1", "WT_C_R2"],
+        output_dir = f"{out}/mapped"
+    run:
+        # Genera la lista de archivos FASTQ separados por comas
+        fastq_files_str = ",".join(input.fastq_files)
+        samples_str = ",".join(params.samples)
+        reference_genome = input.reference_genome
+        output_dir = params.output_dir
+
+        # Llama al script de Python desde el bloque run (sin usar shell)
+        shell(f"""
+        python3 /home/pelamovic/K-CHOPORE/scripts/map_with_minimap2.py \
+            "{fastq_files_str}" \
+            "{samples_str}" \
+            "{reference_genome}" \
+            "{output_dir}"
+        """)
+
+# Rule for sorting and indexing BAM files
+rule sort_and_index_bam:
+    input:
+        sam_files = expand(f"{out}/mapped/{{sample}}.sam", sample=["WT_C_R1", "WT_C_R2"])
+    output:
+        bam_files = expand(f"{out}/sorted_bam/{{sample}}_sorted.bam", sample=["WT_C_R1", "WT_C_R2"])
+    shell:
+        """
+        echo "[INFO] Sorting and indexing BAM files..."
+        export PYTHONPATH=/usr/local/lib/python3.10/dist-packages/
+        python3 /home/pelamovic/K-CHOPORE/scripts/pipelines/sort_and_index_bam.py {input.sam_files} {output.bam_files}
+        echo "[INFO] Sorting and indexing completed."
+        """
+
+# Rule for quality analysis with pycoQC
+rule quality_analysis_with_pycoQC:
+    input:
+        summaries = [
+            "/home/pelamovic/K-CHOPORE/data/raw/summaries/WT_C_R1_sequencing_summary_FAR90122_d34138fc.txt",
+            "/home/pelamovic/K-CHOPORE/data/raw/summaries/WT_C_R2_sequencing_summary_FAR91957_a56dafa5.txt"
+        ],
+        bams = [
+            "/home/pelamovic/K-CHOPORE/results/sorted_bam/WT_C_R1_sorted.bam",
+            "/home/pelamovic/K-CHOPORE/results/sorted_bam/WT_C_R2_sorted.bam"
+        ]
+    output:
+        htmls = [
+            "/home/pelamovic/K-CHOPORE/results/quality_analysis/pycoQC_output_WT_C_R1.html",
+            "/home/pelamovic/K-CHOPORE/results/quality_analysis/pycoQC_output_WT_C_R2.html"
+        ]
+    shell:
+        """
+        echo "[INFO] Running quality analysis with pycoQC for sample WT_C_R1..."
+        /home/pelamovic/K-CHOPORE/k-chopo/bin/pycoQC \
+            -f {input.summaries[0]} \
+            -a {input.bams[0]} \
+            -o {output.htmls[0]} \
+            --report_title "WT_C_R1_Quality_Report"
+        
+        echo "[INFO] Running quality analysis with pycoQC for sample WT_C_R2..."
+        /home/pelamovic/K-CHOPORE/k-chopo/bin/pycoQC \
+            -f {input.summaries[1]} \
+            -a {input.bams[1]} \
+            -o {output.htmls[1]} \
+            --report_title "WT_C_R2_Quality_Report"
+        """
+
+# Rule to execute FLAIR for isoform analysis
+rule run_flair:
+    input:
+        fastq_files = ["/home/pelamovic/K-CHOPORE/data/raw/fastq/WT_C_R1.fastq", "/home/pelamovic/K-CHOPORE/data/raw/fastq/WT_C_R2.fastq"],  # Ajusta si es necesario
+        reference_genome = "/home/pelamovic/K-CHOPORE/data/reference/genome/TAIR10_chr_all.fas.fasta",
+        gtf_file = "/home/pelamovic/K-CHOPORE/data/reference/annotations/AtRTDv2_QUASI_19April2016.gtf"
+    output:
+        transcriptome_gtf = "/home/pelamovic/K-CHOPORE/results/flair/flair.collapse.isoforms.gtf",
+        transcriptome_bed = "/home/pelamovic/K-CHOPORE/results/flair/flair.collapse.isoforms.bed"
+    log:
+        "/home/pelamovic/K-CHOPORE/results/logs/flair.log"
+    shell:
+        """
+        echo "[INFO] Running FLAIR for isoform analysis..."
+        cd /home/pelamovic/K-CHOPORE/scripts/pipelines/flair  # Ajusta la ruta si es necesario
+        python3 flair.py align -g {input.reference_genome} -r {input.fastq_files} -o {output.transcriptome_gtf}
+        python3 flair.py collapse -g {input.reference_genome} -r {input.fastq_files} -f {input.gtf_file} -o {output.transcriptome_gtf}
+        python3 flair.py quantify -g {input.reference_genome} -r {input.fastq_files} -o {output.transcriptome_gtf}
+        gtfToGenePred {output.transcriptome_gtf} stdout | genePredToBed stdin {output.transcriptome_bed}
+        echo "[INFO] FLAIR isoform analysis completed."
+        """
+
+# Rule to execute the analysis with ELIGOS2
+# Rule to execute the analysis with ELIGOS2
+rule eligos2:
+    input:
+        bam_files = expand(f"{out}/sorted_bam/{{sample}}_sorted.bam", sample=["WT_C_R1", "WT_C_R2"]),
+        reference_genome = "/home/pelamovic/K-CHOPORE/data/reference/genome/TAIR10_chr_all.fas.fasta",  # Ajusta la ruta a la referencia correcta
+        bed_file = "/home/pelamovic/K-CHOPORE/data/transcriptoma_FLAIR/flair.collapse.isoforms_clean.bed"
+    output:
+        eligos_results = os.path.join(out, "eligos", "{sample}_eligos_output.txt")
+    log:
+        os.path.join(out, "logs", "eligos2_{sample}.log")
+    shell:
+        """
+        echo "[INFO] Running ELIGOS2 for {wildcards.sample}..."
+        export PYTHONPATH=/home/pelamovic/K-CHOPORE/k-chopo/lib/python3.12/site-packages/
+        /home/pelamovic/K-CHOPORE/scripts/pipelines/eligos2/eligos2 rna_mod \
+            -i {input.bam_files} \
+            -reg {input.bed_file} \
+            -ref {input.reference_genome} \
+            -o {output.eligos_results} \
+            --pval 0.05 \
+            --oddR 5 \
+            --esb 0.2 \
+            > {log} 2>&1
+        echo "[INFO] ELIGOS2 analysis for {wildcards.sample} completed."
+        """
+
+# "all" rule to execute the entire pipeline
+# "all" rule to execute the entire pipeline
+rule all:
+    input:
+        # Directorios creados
+        "directories_created.txt",
+        # Archivos SAM (del mapeo con Minimap2)
+        expand(f"{out}/mapped/{{sample}}.sam", sample=["WT_C_R1", "WT_C_R2"]),
+        # Archivos BAM ordenados e indexados
+        expand(f"{out}/sorted_bam/{{sample}}_sorted.bam", sample=["WT_C_R1", "WT_C_R2"]),
+        # Salida de pycoQC (análisis de calidad)
+        expand(f"{out}/quality_analysis/pycoQC_output_{{sample}}.html", sample=["WT_C_R1", "WT_C_R2"]),
+        # Archivos de FLAIR (análisis de isoformas)
+        os.path.join(out, "flair", "flair.collapse.isoforms.gtf"),
+        os.path.join(out, "flair", "flair.collapse.isoforms.bed"),
+        # Salida de ELIGOS2 (detección epitranscriptómica por muestra)
+        expand(os.path.join(out, "eligos", "{sample}_eligos_output.txt"), sample=["WT_C_R1", "WT_C_R2"])
+
+
