@@ -13,6 +13,10 @@
 # +34 660 74 11 39
 # ---------------------------------------------------------
 
+# ---------------------------------------------------------
+# Pipeline K-CHOPORE en Snakemake
+# ---------------------------------------------------------
+
 import os
 
 # Cargar el archivo de configuración
@@ -32,7 +36,6 @@ reference_index = config["input_files"]["reference_genome_mmi"]
 flair_output_dir = config["input_files"]["flair_output_dir"]
 gtf_file = config["input_files"]["gtf_file"]
 bed_file = config["input_files"]["bed_file"]
-counts_matrix = config["input_files"]["counts_matrix"]
 
 # Parámetros del pipeline
 threads = config["params"]["threads"]
@@ -97,17 +100,13 @@ rule setup_complete_structure:
             f.write("Estructura completa del proyecto creada.")
         print("[INFO] Estructura completa del proyecto creada exitosamente.")
 
-
-
-
-
-
 # Regla para indexar el genoma de referencia usando Minimap2
 rule index_genome:
     input:
-        reference_genome = reference_genome
+        structure_created="complete_structure_created.txt",
+        reference_genome=reference_genome
     output:
-        reference_index = reference_index
+        reference_index=reference_index
     shell:
         """
         echo "[INFO] Indexando el genoma de referencia usando Minimap2..."
@@ -115,39 +114,12 @@ rule index_genome:
         echo "[INFO] Indexación del genoma completada."
         """
 
-
-#Regla para indexar el genoma de referencia usando Minimap2
-#rule basecalling:
-#    input:
-#        fast5_dir = FAST5_DIR
-#    output:
-#        fastq_dir = os.path.join(out, "basecalls")
-#    params:
-#        threads = threads,
-#        basecaller = config["tools"]["basecaller"],
-#        guppy_config = config["tools"]["guppy_config_file"],
-#        bonito_model = config["tools"]["bonito_model"]
-#    shell:
-#        """
-#        if [[ "{params.basecaller}" == "guppy" ]]; then
-#            echo "[INFO] Ejecutando basecaller Guppy..."
-#            guppy_basecaller --input_path {input.fast5_dir} --save_path {output.fastq_dir} \
-#                             --config {params.guppy_config} --num_callers {params.threads}
-#        elif [[ "{params.basecaller}" == "bonito" ]]; then
-#            echo "[INFO] Ejecutando basecaller Bonito..."
-#            bonito basecaller {params.bonito_model} {input.fast5_dir} > {output.fastq_dir}/bonito_output.fastq
-#        fi
-#        echo "[INFO] Basecalling completado."
-#        """
-
-# Regla para mapear lecturas FASTQ usando Minimap2
-
-
 # Regla para mapear lecturas FASTQ usando Minimap2
 rule map_with_minimap2:
     input:
-        fastq_files=expand("data/raw/fastq/{sample}.fastq", sample=["WT_C_R1", "WT_C_R2"]),
-        reference_index=reference_index
+        structure_created="complete_structure_created.txt",
+        reference_index=reference_index,
+        fastq_files=expand("data/raw/fastq/{sample}.fastq", sample=["WT_C_R1", "WT_C_R2"])
     output:
         sam_files=expand("results/mapped/{sample}.sam", sample=["WT_C_R1", "WT_C_R2"])
     params:
@@ -165,7 +137,8 @@ rule map_with_minimap2:
 # Regla para ordenar e indexar archivos BAM
 rule sort_and_index_bam:
     input:
-        sam_files="results/mapped/{sample}.sam"
+        structure_created="complete_structure_created.txt",
+        sam_file="results/mapped/{sample}.sam"
     output:
         bam_file="results/sorted_bam/{sample}_sorted.bam"
     shell:
@@ -173,13 +146,14 @@ rule sort_and_index_bam:
         echo "[INFO] Ordenando e indexando archivos BAM..."
         rm -f {output.bam_file}.tmp.*
         export PYTHONPATH=/usr/local/lib/python3.10/dist-packages/
-        python3 /workspace/scripts/pipelines/sort_and_index_bam.py {input.sam_files} {output.bam_file}
+        python3 /workspace/scripts/pipelines/sort_and_index_bam.py {input.sam_file} {output.bam_file}
         echo "[INFO] Ordenamiento e indexación completados."
         """
 
 # Regla para análisis de calidad con pycoQC
 rule quality_analysis_with_pycoQC:
     input:
+        structure_created="complete_structure_created.txt",
         summary="data/raw/summaries/{sample}_sequencing_summary.txt",
         bam="results/sorted_bam/{sample}_sorted.bam"
     output:
@@ -192,65 +166,121 @@ rule quality_analysis_with_pycoQC:
         """
 
 # Regla para ejecutar FLAIR para análisis de isoformas
-rule run_flair:
+# Regla para ejecutar FLAIR para análisis de isoformas
+
+#rule run_flair:
+#    input:
+#        structure_created="complete_structure_created.txt",
+#        fastq_files="data/raw/fastq/{sample}.fastq",
+#        reference_genome=reference_genome,
+#        gtf_file=gtf_file
+#    output:
+#        transcriptome_gtf="results/flair/flair.collapse.isoforms.gtf",
+#        transcriptome_bed="results/flair/flair.collapse.isoforms.bed"
+#    params:
+#        flair_path="./scripts/pipelines/flair/src/flair"  # Ruta al directorio de FLAIR
+#    shell:
+#        """
+#        echo "[INFO] Ejecutando FLAIR para análisis de isoformas..."
+#        python {params.flair_path}/flair_align.py -g {input.reference_genome} -r {input.fastq_files} -o {output.transcriptome_gtf}
+#        python {params.flair_path}/flair_collapse.py -g {input.reference_genome} -r {input.fastq_files} -f {input.gtf_file} -o {output.transcriptome_gtf}
+#        gtfToGenePred {output.transcriptome_gtf} stdout | genePredToBed stdin {output.transcriptome_bed}
+#        echo "[INFO] Análisis de isoformas con FLAIR completado."
+#        """
+
+
+
+
+
+# Regla para ejecutar FLAIR para análisis de isoformas
+rule flair_quantify:
     input:
-        fastq_files = FASTQ_FILES,
-        reference_genome = reference_genome,
-        gtf_file = gtf_file
+        isoforms_fa="results/flair/{sample}_flair.collapse.isoforms.fa",
+        reads_manifest="data/raw/reads_manifest.tsv"
     output:
-        transcriptome_gtf = os.path.join(out, "flair", "flair.collapse.isoforms.gtf"),
-        transcriptome_bed = os.path.join(out, "flair", "flair.collapse.isoforms.bed")
+        tpm_output="results/flair/{sample}_quantify_tpm.tsv"
+    params:
+        threads=threads
     shell:
         """
-        echo "[INFO] Ejecutando FLAIR para análisis de isoformas..."
-        flair align -g {input.reference_genome} -r {input.fastq_files} -o {output.transcriptome_gtf}
-        flair collapse -g {input.reference_genome} -r {input.fastq_files} -f {input.gtf_file} -o {output.transcriptome_gtf}
-        gtfToGenePred {output.transcriptome_gtf} stdout | genePredToBed stdin {output.transcriptome_bed}
-        echo "[INFO] Análisis de isoformas con FLAIR completado."
+        echo "[INFO] Cuantificando isoformas con FLAIR..."
+        python3 /workspace/scripts/pipelines/flair/flair.py quantify -r {input.reads_manifest} -i {input.isoforms_fa} --salmon --tpm
+        echo "[INFO] Cuantificación con FLAIR completada."
+
         """
 
+# Regla para análisis diferencial de expresión con FLAIR
+rule flair_diff_exp:
+    input:
+        counts_matrix="results/flair/counts_matrix.tsv"
+    output:
+        diff_exp_output="results/flair/diffExp_salmon/diffExp_results.tsv"
+    params:
+        out_dir="results/flair/diffExp_salmon",
+        threads=threads
+    shell:
+        """
+        echo "[INFO] Ejecutando análisis diferencial de expresión con FLAIR..."
+        python3 /workspace/scripts/pipelines/flair/flair.py diffExp -q {input.counts_matrix} -o {params.out_dir}
+        echo "[INFO] Análisis diferencial de expresión completado."
+        """
+
+# Regla para análisis de splicing diferencial con FLAIR
+rule flair_diff_splice:
+    input:
+        isoforms_bed="results/flair/{sample}_flair.collapse.isoforms.bed",
+        counts_matrix="results/flair/counts_matrix.tsv"
+    output:
+        diff_splice_output="results/flair/diffSplice_results.tsv"
+    shell:
+        """
+        echo "[INFO] Ejecutando análisis de splicing diferencial con FLAIR..."
+        python3 /workspace/scripts/pipelines/flair/flair.py diffSplice -i {input.isoforms_bed} -q {input.counts_matrix} --test
+        echo "[INFO] Análisis de splicing diferencial completado."
+        """
+
+
+
+
+# regla eligos2 para epimarks
+# Regla para ejecutar ELIGOS2
 # Regla para ejecutar ELIGOS2 para análisis epitranscriptómico
 rule run_eligos2:
     input:
-        bam_files = expand(os.path.join(out, "sorted_bam", "{sample}_sorted.bam"), sample=["WT_C_R1", "WT_C_R2"]),
-        reference_genome = reference_genome,
-        bed_file = bed_file
+        bam_file="results/sorted_bam/{sample}_sorted.bam",
+        reference_genome="data/reference/genome/TAIR10_chr_all.fas.fasta",
+        region_bed="/workspace/data/transcriptoma_FLAIR/flair.collapse.isoforms.bed"
     output:
-        eligos_output = expand(os.path.join(out, "eligos", "{sample}_eligos_output.txt"), sample=["WT_C_R1", "WT_C_R2"])
+        eligos_output="results/eligos/{sample}_eligos_output.txt"
+    log:
+        "logs/eligos2_{sample}.log"
     shell:
         """
         echo "[INFO] Ejecutando ELIGOS2 para análisis epitranscriptómico..."
-        for sample in WT_C_R1 WT_C_R2; do
-            eligos2 rna_mod -i {input.bam_files} -reg {input.bed_file} -ref {input.reference_genome} \
-            -o {output.eligos_output}
-            echo "[INFO] Análisis con ELIGOS2 completado para la muestra {sample}."
-        done
+        python3 /workspace/scripts/pipelines/eligos2/eligos2 rna_mod \
+            -i {input.bam_file} \
+            -reg {input.region_bed} \
+            -ref {input.reference_genome} \
+            -o results/eligos \
+            --pval 0.05 \
+            --oddR 5 \
+            --esb 0.2 \
+            > {log} 2>&1
+        echo "[INFO] Análisis con ELIGOS2 completado para la muestra {wildcards.sample}."
         """
 
-# Regla para generar el informe de MultiQC
-#rule run_multiqc:
-#    input:
-#        directories = [
-#            os.path.join(out, dir) for dir in ["basecalls", "mapped", "sorted_bam", "quality_analysis", "flair", "eligos"]
-#        ]
-#    output:
-#        multiqc_report = os.path.join(out, "multiqc", "multiqc_report.html")
-#    shell:
-#        """
-#        echo "[INFO] Generando informe MultiQC..."
-#        multiqc {input.directories} -o {output.multiqc_report}
-#        echo "[INFO] Informe MultiQC generado en {output.multiqc_report}."
-#        """
 
+
+# Regla "all" para ejecutar todo el pipeline
 # Regla "all" para ejecutar todo el pipeline
 rule all:
     input:
         "complete_structure_created.txt",
-        expand(os.path.join(out, "mapped", "{sample}.sam"), sample=["WT_C_R1", "WT_C_R2"]),
-        expand(os.path.join(out, "sorted_bam", "{sample}_sorted.bam"), sample=["WT_C_R1", "WT_C_R2"]),
-        expand(os.path.join(out, "quality_analysis", "pycoQC_output_{sample}.html"), sample=["WT_C_R1", "WT_C_R2"]),
-        os.path.join(out, "flair", "flair.collapse.isoforms.gtf"),
-        os.path.join(out, "flair", "flair.collapse.isoforms.bed"),
-        expand(os.path.join(out, "eligos", "{sample}_eligos_output.txt"), sample=["WT_C_R1", "WT_C_R2"]),
-        #os.path.join(out, "multiqc", "multiqc_report.html")
+        reference_index,
+        expand("results/mapped/{sample}.sam", sample=["WT_C_R1", "WT_C_R2"]),
+        expand("results/sorted_bam/{sample}_sorted.bam", sample=["WT_C_R1", "WT_C_R2"]),
+        expand("results/quality_analysis/pycoQC_output_{sample}.html", sample=["WT_C_R1", "WT_C_R2"]),
+        expand("results/flair/{sample}_flair.collapse.isoforms.gtf", sample=["WT_C_R1", "WT_C_R2"]),
+        expand("results/flair/{sample}_flair.collapse.isoforms.bed", sample=["WT_C_R1", "WT_C_R2"]),
+        expand("results/eligos/{sample}_eligos_output.txt", sample=["WT_C_R1", "WT_C_R2"])
 

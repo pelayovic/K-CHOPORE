@@ -207,6 +207,8 @@ COPY data /workspace/data
 COPY config /workspace/config
 COPY requirements.txt /workspace/requirements.txt
 ENV PYTHONPATH="/usr/local/lib/python3.10/dist-packages"
+RUN pip install pysam
+ENV PATH="/home/eligos2:/home/eligos2/Scripts:$PATH"
 
 
 RUN echo "🌟 K-CHOPORE Docker image built successfully! Dive into Nanopore sequencing data analysis! 🍴"
