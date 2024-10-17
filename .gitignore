@@ -1,6 +1,6 @@
 # Ignorar la carpeta results
 results/
-myenv/
+myenv/*
 # Ignorar archivos temporales y carpetas de Snakemake
 .snakemake/
 logs/
