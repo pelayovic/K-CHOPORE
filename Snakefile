@@ -265,6 +265,7 @@ rule run_eligos2:
             --pval 0.05 \
             --oddR 5 \
             --esb 0.2 \
+            --threads 10
             > {log} 2>&1
         echo "[INFO] Análisis con ELIGOS2 completado para la muestra {wildcards.sample}."
         """
