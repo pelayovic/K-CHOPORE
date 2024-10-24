@@ -1,74 +1,137 @@
 # K-CHOPORE 🌟
-**Keen Comprehensive High-throughput Omics Pipeline Organizer**
+### Keen Comprehensive High-throughput Omics Pipeline Organizer
 
-Just like a classic Asturian cachopo, K-CHOPORE is a hearty and satisfying tool for Nanopore sequencing data analysis! 🧬🍴 Dive in and enjoy the data feast with K-CHOPORE! 📊💻
+Just like the iconic Asturian **cachopo**, K-CHOPORE is a layered and satisfying bioinformatics pipeline designed for analyzing **Nanopore RNA-seq** data with a focus on **epitranscriptomics**! 🧬🍴 Dive into the data feast, where each component works together to deliver high-quality, reproducible results. 📊💻
 
 ---
 
 ## 📜 Overview
+**K-CHOPORE** is an open-source pipeline for the comprehensive analysis of Nanopore sequencing data, tailored to handle every step from basecalling to epitranscriptomic modification detection. It integrates multiple cutting-edge bioinformatics tools, including **Snakemake**, **Docker**, **Python**, and well-established tools such as **Guppy**, **Minimap2**, **FLAIR**, and **ELIGOS2**. The pipeline emphasizes **FAIR-compliance** (Findable, Accessible, Interoperable, and Reusable) to ensure reproducibility and scalability across diverse research settings.
 
-**K-CHOPORE** is an automated pipeline for comprehensive analysis of Nanopore sequencing data, designed to handle the entire process from basecalling to epitranscriptomic modification detection. By integrating various specialized tools, K-CHOPORE allows you to perform in-depth RNA-Seq data analysis, covering all critical steps and ensuring robust, reproducible results.
+### Key Features
+- **FAIR-Compliant**: Adheres to the FAIR principles, ensuring Findable, Accessible, Interoperable, and Reusable workflows.
+- **Automated Workflow**: Uses Snakemake to streamline each step of the analysis, reducing manual intervention and errors.
+- **Containerized Environment**: Employs Docker to guarantee reproducibility across different systems, solving dependency issues.
+- **Comprehensive Tools**: Integrates well-known tools such as **Guppy** (basecalling), **Minimap2** (alignment), **FLAIR** (isoform quantification), and **ELIGOS2** (RNA modification detection).
 
 ---
+## Table of Contents
+- [Key Features](#key-features)
+- [Getting Started](#getting-started)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Pipeline Structure](#pipeline-structure)
+- [Running the Pipeline](#running-the-pipeline)
+- [Customization](#customization)
+- [Contributing](#contributing)
+- [License](#license)
+- [Hands-On Guide](#hands-on-guide)
+- [Troubleshooting](#troubleshooting)
 
-## 🔧 Pipeline Components
+## 📖 Getting Started
+To get started with **K-CHOPORE**, you'll need to meet a few prerequisites and follow the installation steps below. The pipeline is designed to be **modular** and **flexible**, allowing you to analyze **RNA-seq data** from plants or any other organisms, performing everything from **basecalling** to **epitranscriptomic modification detection**.
 
-### 1. Basecalling with Guppy
-- **Description**: Converts raw Nanopore sequencing signals into readable DNA sequences.
-- **Command**:
-  ```bash
-  guppy_basecaller -i input_directory -s output_directory -c dna_r9.4.1_450bps_hac.cfg
-### 2. Sequence Quality Check with pycoQC
-- **Description**: Assesses the quality of generated sequences.
-- **Installation and Execution**:
-  ```bash
-  pip3 install pycoQC
+## 🔧 Prerequisites
+Ensure you have the following installed:
 
-  pycoQC -f ./pycoQC/anac017-1_C_R1_sequencing_summary.txt -a ./pycoQC/anac017-1_C_R1_sorted.bam -o anac017-1_C_R1.html --report_title "anac017-1_C_R1"
+### 1. Docker
+Docker is required to run **K-CHOPORE** in a fully isolated environment. Install Docker following the instructions for your system:
+- [Docker for Windows](https://docs.docker.com/docker-for-windows/install/)
+- [Docker for Mac](https://docs.docker.com/docker-for-mac/install/)
+- [Docker for Linux](https://docs.docker.com/engine/install/)
 
-### 3. Transcriptome Construction with FLAIR
-- **Description**: Constructs and aligns transcriptomes using FLAIR. This step is optional and user-configurable.
-- **Installation and Execution**:
+Verify that Docker is installed:
 
-  ```bash
-  conda env create -n FLAIR_original -f FLAIR.yml
-  cd Desktop/flair_master
-  python flair.py align -g TAIR10_chr_all.fas -r WT_C_R1.fq.gz
-  samtools sort flair.aligned.unsorted.bam -o flair.aligned.sorted.bam
-  samtools index flair.aligned.sorted.bam
-  python ./bin/bam2Bed12.py -i flair.aligned.sorted.bam > flair.aligned.sorted.bed
-- **Reference Genome Normalization**:
+```bash
+docker --version
+```
+### 2. Snakemake
+#### Install Snakemake for workflow management:
 
-  ```bash
-  java -jar picard.jar NormalizeFasta I=TAIR_chr_all.fas O=TAIR_chr_all_norm.fas
-- **Concatenation and Analysis**:
+```bash
+pip install snakemake
+```
+#### Check that Snakemake is installed correctly:
 
-  ```bash
-  cat *.bed > WT_flair_all_corrected_concatenated.bed
-  python flair.py collapse -g TAIR10_chr_all.fas -r WT_concatenated.fastq -q WT_flair_all_corrected_concatenated.bed -f AtRTD2_19April2016.gtf
-  python flair.py quantify -r reads_manifest.tsv -i flair.collapse.isoforms.fa --salmon --tpm
-  python flair.py diffExp -q counts_matrix.tsv -o ./output/diffExp_salmon
-  python flair.py diffSplice -i ./DRS/flair.collapse.isoforms.bed -q ./DRS/counts_matrix.tsv --test
-  python ./bin/diff_iso_usage.py ./DRS/WT_counts_matrix_sumadas.tsv WT_C WT_AA diff_isos.txt
-### 4. Additional Analysis
-- **Description**: In-depth analysis of the results, including multivariable analysis.
-- **Objective**: Identify significant isoforms and perform comprehensive analysis.
+```bash
+snakemake --version
+```
 
-- **Proposed Commands**:
+### 3. Git
+#### Install Git to clone the K-CHOPORE repository:
 
-- **Result Analysis**:
 
-  ```python
+```bash
+git --version
+```
 
-  # Evaluate differences with DEXSeq and DRIMSeq
-  # References:
-  # https://towardsdatascience.com/a-large-sample-crisis-or-not-640224020757
-  # https://genomebiology.biomedcentral.com/articles/10.1186/s13059-022-02648-4
-- ** Multivariable Analysis (PCA, sPLS)**:
+### 4. Python 3.8+
+#### K-CHOPORE requires Python 3.8+ to run custom scripts. Ensure that the correct version of Python is installed:
 
-  ```python
-    # Perform PCA, sPLS to determine isoforms with specific characteristics.
-    # Count the number of new isoforms, DEGs, classify splicing events, run IsoformSwitchAnalyzeR
+```bash
+python --version
+```
+
+## 🔥 Installation
+Follow these steps to install **K-CHOPORE** and set up the necessary environment:
+
+### Step 1: Clone the K-CHOPORE Repository
+Open a terminal and clone the **K-CHOPORE** GitHub repository:
+
+```bash
+git clone https://github.com/pelayovic/K-CHOPORE.git
+cd K-CHOPORE
+```
+### Step 2: Build the Docker Image
+Inside the cloned K-CHOPORE directory, build the Docker image:
+
+```bash
+sudo docker build -t k-chopore .
+```
+This process will pull in all necessary dependencies, ensuring a reproducible environment.
+
+### Step 3: Configure the Pipeline
+Edit the config.yml file located in the config/ folder to point to your input files (e.g., FAST5 files for Nanopore sequencing) and the reference genome:
+
+```yaml
+input_files:
+  fast5_dir: "/workspace/data/raw/fast5"
+  reference_genome: "/workspace/data/reference/genome.fasta"
+output_dir: "/workspace/results"
+```
+## 🏗️ Pipeline Structure
+K-CHOPORE’s structure follows a modular approach, ensuring clarity and scalability. The core components are as follows:
+
+```bash
+
+K-CHOPORE/
+│
+├── data/                      # Input data (FAST5, FASTQ, etc.)
+├── results/                   # Pipeline outputs
+├── config/                    # Configuration files for the pipeline
+├── scripts/                   # Python scripts used in the pipeline
+├── Snakefile                  # Snakemake workflow definition
+├── Dockerfile                 # Dockerfile for building the containerized environment
+└── README.md                  # Project documentation
+```
+
+## 🚀 Running the Pipeline
+#### Basic Command
+To execute the full K-CHOPORE pipeline, run the following command. This will start with basecalling and proceed through RNA modification detection:
+
+```bash
+
+sudo docker run -it --rm -v /path/to/your/local/data:/workspace k-chopore \
+    snakemake --snakefile /workspace/Snakefile --configfile /workspace/config/config.yml \
+    --cores 10 --latency-wait 30 --printshellcmds
+```
+#### Execute a Specific Rule
+If you want to run only a specific rule (e.g., basecalling or alignment), use:
+
+```bash
+sudo docker run -it --rm -v /path/to/your/local/data:/workspace k-chopore \
+    snakemake --snakefile /workspace/Snakefile --cores 10 basecalling
+```
 
 ## ⚙ Configuration
 
