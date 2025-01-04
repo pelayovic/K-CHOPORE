@@ -5,6 +5,9 @@ Just like the iconic Asturian **cachopo**, K-CHOPORE is a layered and satisfying
 
 ---
 
+![image](https://github.com/user-attachments/assets/64bb5e93-3e63-4352-99a2-bd1ba350a670)
+
+
 ## 📜 Overview
 **K-CHOPORE** is an open-source pipeline for the comprehensive analysis of Nanopore sequencing data, tailored to handle every step from basecalling to epitranscriptomic modification detection. It integrates multiple cutting-edge bioinformatics tools, including **Snakemake**, **Docker**, **Python**, and well-established tools such as **Guppy**, **Minimap2**, **FLAIR**, and **ELIGOS2**. The pipeline emphasizes **FAIR-compliance** (Findable, Accessible, Interoperable, and Reusable) to ensure reproducibility and scalability across diverse research settings.
 
